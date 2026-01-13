@@ -1108,6 +1108,7 @@ dependencies = [
 name = "doubledecker"
 version = "0.1.0"
 dependencies = [
+ "arrow-json",
  "axum",
  "bytes",
  "datafusion",

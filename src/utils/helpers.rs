@@ -1,5 +1,6 @@
 use crate::utils::error::DoubledeckerError;
 use crate::utils::statics::{AggFunc, Aggregation, FilterOp, QueryResponse};
+use arrow_json::writer::{JsonArray, WriterBuilder};
 use axum::extract::Multipart;
 use datafusion::arrow::array::*;
 use datafusion::error::Result as DfResult;
@@ -55,27 +56,13 @@ pub async fn handle_file_upload(mut multipart: Multipart) -> Result<String, Doub
         if field.name() == Some("file") {
             let file_path = format!("{}/upload_{}.csv", upload_dir, Uuid::new_v4());
 
-            eprintln!("Creating file: {}", file_path);
-
             // Collect all chunks into a buffer
             let mut stream = field;
             let mut buffer = Vec::new();
-            let mut chunk_count = 0usize;
 
             while let Some(chunk) = stream.chunk().await? {
                 buffer.extend_from_slice(&chunk);
-                chunk_count += 1;
-
-                if chunk_count % 100 == 0 {
-                    eprintln!(
-                        "Received {} bytes in {} chunks...",
-                        buffer.len(),
-                        chunk_count
-                    );
-                }
             }
-
-            eprintln!("Received {} bytes in {} chunks", buffer.len(), chunk_count);
 
             // Parse CSV and normalize headers to lowercase
             let csv_str = String::from_utf8(buffer)
@@ -97,94 +84,12 @@ pub async fn handle_file_upload(mut multipart: Multipart) -> Result<String, Doub
             file.write_all(normalized_csv.as_bytes()).await?;
             file.flush().await?;
 
-            eprintln!("Wrote normalized CSV with lowercase headers");
             return Ok(file_path);
         }
     }
     Err(DoubledeckerError::FileUpload(
         "No file field found in multipart data".to_string(),
     ))
-}
-
-fn extract_typed_value(
-    array: &dyn Array,
-    row_idx: usize,
-) -> Result<serde_json::Value, DoubledeckerError> {
-    use datafusion::arrow::datatypes::DataType;
-
-    if array.is_null(row_idx) {
-        return Ok(serde_json::Value::Null);
-    }
-
-    match array.data_type() {
-        DataType::Int8 => {
-            let arr = array.as_any().downcast_ref::<Int8Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Int16 => {
-            let arr = array.as_any().downcast_ref::<Int16Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Int32 => {
-            let arr = array.as_any().downcast_ref::<Int32Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Int64 => {
-            let arr = array.as_any().downcast_ref::<Int64Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt8 => {
-            let arr = array.as_any().downcast_ref::<UInt8Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt16 => {
-            let arr = array.as_any().downcast_ref::<UInt16Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt32 => {
-            let arr = array.as_any().downcast_ref::<UInt32Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::UInt64 => {
-            let arr = array.as_any().downcast_ref::<UInt64Array>().unwrap();
-            Ok(serde_json::Value::Number(arr.value(row_idx).into()))
-        }
-        DataType::Float32 => {
-            let arr = array.as_any().downcast_ref::<Float32Array>().unwrap();
-            let value = arr.value(row_idx);
-            serde_json::Number::from_f64(value as f64)
-                .map(serde_json::Value::Number)
-                .ok_or_else(|| {
-                    DoubledeckerError::DataFusionError("Invalid float value".to_string())
-                })
-        }
-        DataType::Float64 => {
-            let arr = array.as_any().downcast_ref::<Float64Array>().unwrap();
-            let value = arr.value(row_idx);
-            serde_json::Number::from_f64(value)
-                .map(serde_json::Value::Number)
-                .ok_or_else(|| {
-                    DoubledeckerError::DataFusionError("Invalid float value".to_string())
-                })
-        }
-        DataType::Boolean => {
-            let arr = array.as_any().downcast_ref::<BooleanArray>().unwrap();
-            Ok(serde_json::Value::Bool(arr.value(row_idx)))
-        }
-        DataType::Utf8 => {
-            let arr = array.as_any().downcast_ref::<StringArray>().unwrap();
-            Ok(serde_json::Value::String(arr.value(row_idx).to_string()))
-        }
-        DataType::LargeUtf8 => {
-            let arr = array.as_any().downcast_ref::<LargeStringArray>().unwrap();
-            Ok(serde_json::Value::String(arr.value(row_idx).to_string()))
-        }
-        _ => {
-            let value_str = datafusion::arrow::util::display::array_value_to_string(array, row_idx)
-                .map_err(|e| DoubledeckerError::DataFusionError(e.to_string()))?;
-            Ok(serde_json::Value::String(value_str))
-        }
-    }
 }
 
 pub async fn parse_batch_to_json(
@@ -196,28 +101,86 @@ pub async fn parse_batch_to_json(
             rows: vec![],
         });
     }
-    eprintln!("Batch schema: {:#?}", batches[0].schema());
+
     let schema = batches[0].schema();
     let columns: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
 
-    let mut all_rows = Vec::new();
+    // Use Arrow's optimized JSON writer with explicit nulls
+    let mut buf = Vec::new();
+    let mut writer = WriterBuilder::new()
+        .with_explicit_nulls(true) // Ensure null values are written as {"key": null}
+        .build::<_, JsonArray>(&mut buf);
 
-    for batch in batches.iter() {
-        let num_rows = batch.num_rows();
-        eprintln!("number of rows {}", num_rows);
-        for row_idx in 0..num_rows {
-            let mut row_data = Vec::new();
-            for col_idx in 0..batch.num_columns() {
-                let col = batch.column(col_idx);
-                let value = extract_typed_value(col, row_idx)?;
-                row_data.push(value);
-            }
-            all_rows.push(serde_json::Value::Array(row_data));
-        }
-    }
+    let batch_refs: Vec<&RecordBatch> = batches.iter().collect();
+    writer
+        .write_batches(&batch_refs)
+        .map_err(|e| DoubledeckerError::DataFusionError(format!("JSON conversion error: {}", e)))?;
+    writer.finish().map_err(|e| {
+        DoubledeckerError::DataFusionError(format!("JSON finalization error: {}", e))
+    })?;
+
+    // Parse the JSON objects
+    let json_str = String::from_utf8(buf).map_err(|e| {
+        DoubledeckerError::DataFusionError(format!("UTF-8 conversion error: {}", e))
+    })?;
+
+    // cos json string returned by arrow_json crate is an object, we then map and convert to array
+    let json_objects: Vec<serde_json::Map<String, serde_json::Value>> =
+        serde_json::from_str(&json_str)
+            .map_err(|e| DoubledeckerError::DataFusionError(format!("JSON parse error: {}", e)))?;
+
+    // Convert objects to arrays using column order
+    let json_rows: Vec<serde_json::Value> = json_objects
+        .into_iter()
+        .map(|obj| {
+            let row_array: Vec<serde_json::Value> = columns
+                .iter()
+                .map(|col_name| {
+                    obj.get(col_name)
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null)
+                })
+                .collect();
+            serde_json::Value::Array(row_array)
+        })
+        .collect();
 
     Ok(QueryResponse {
         columns,
-        rows: all_rows,
+        rows: json_rows,
     })
+}
+
+// Convert QueryResponse to CSV format
+pub fn query_response_to_csv(response: &QueryResponse) -> String {
+    let mut csv = String::new();
+
+    csv.push_str(&response.columns.join(","));
+    csv.push('\n');
+
+    for row in &response.rows {
+        if let serde_json::Value::Array(values) = row {
+            let row_str: Vec<String> = values
+                .iter()
+                .map(|v| match v {
+                    serde_json::Value::String(s) => {
+                        // Escape quotes and wrap in quotes if contains comma or quote
+                        if s.contains(',') || s.contains('"') || s.contains('\n') {
+                            format!("\"{}\"", s.replace('"', "\"\""))
+                        } else {
+                            s.clone()
+                        }
+                    }
+                    serde_json::Value::Null => String::new(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    _ => v.to_string(),
+                })
+                .collect();
+            csv.push_str(&row_str.join(","));
+            csv.push('\n');
+        }
+    }
+
+    csv
 }

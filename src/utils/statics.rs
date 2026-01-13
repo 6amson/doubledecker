@@ -1,7 +1,7 @@
+use crate::server::executor::QueryExecutor;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::server::executor::QueryExecutor;
 
 #[derive(Debug, Deserialize)]
 pub enum FilterOp {
@@ -31,6 +31,14 @@ pub struct Aggregation {
 }
 
 #[derive(Debug, Deserialize)]
+pub enum TransformOp {
+    Multiply,
+    Divide,
+    Add,
+    Subtract,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum Operations {
     Select {
@@ -52,6 +60,12 @@ pub enum Operations {
     Limit {
         count: usize,
     },
+    Transform {
+        column: String,
+        operation: TransformOp,
+        value: f64,
+        alias: String,
+    },
 }
 
 #[derive(Clone)]
@@ -62,7 +76,7 @@ pub struct AppState {
 
 #[derive(Deserialize)]
 pub struct QueryRequest {
-   pub operations: Vec<Operations>,
+    pub operations: Vec<Operations>,
 }
 
 #[derive(Serialize)]

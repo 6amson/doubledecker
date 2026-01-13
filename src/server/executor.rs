@@ -1,11 +1,10 @@
+use crate::utils::error::DoubledeckerError;
+use crate::utils::helpers::{build_aggregation_expr, build_filter_expr, parse_batch_to_json};
+use crate::utils::statics::{Operations, QueryResponse, TransformOp};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::error::Result;
 use datafusion::logical_expr::{Expr, col};
-use datafusion::prelude::{CsvReadOptions, DataFrame, SessionContext};
-
-use crate::utils::error::DoubledeckerError;
-use crate::utils::helpers::{build_aggregation_expr, build_filter_expr, parse_batch_to_json};
-use crate::utils::statics::{Operations, QueryResponse};
+use datafusion::prelude::{CsvReadOptions, DataFrame, SessionContext, lit};
 
 pub struct QueryExecutor {
     ctx: SessionContext,
@@ -58,7 +57,6 @@ impl QueryExecutor {
     ) -> Result<QueryResponse, DoubledeckerError> {
         let df = self.ctx.table(table_name).await?;
         let description = df.describe().await?;
-        eprintln!("Description schema: {:#?}", description.schema());
         let description_batch = description.collect().await?;
         let reponse = parse_batch_to_json(description_batch).await?;
         Ok(reponse)
@@ -98,6 +96,24 @@ impl QueryExecutor {
                 };
 
                 df.sort(vec![expr_fn])
+            }
+            Operations::Transform {
+                column,
+                operation,
+                value,
+                alias,
+            } => {
+                let source_expr = col(&column);
+                let value_lit = lit(value);
+
+                let transform_expr = match operation {
+                    TransformOp::Multiply => source_expr * value_lit,
+                    TransformOp::Divide => source_expr / value_lit,
+                    TransformOp::Add => source_expr + value_lit,
+                    TransformOp::Subtract => source_expr - value_lit,
+                };
+
+                df.with_column(&alias, transform_expr)
             }
             Operations::Limit { count } => df.limit(0, Some(count)),
         }

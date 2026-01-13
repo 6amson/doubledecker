@@ -2,7 +2,7 @@
 
 use crate::{
     server::{
-        core::{describe_table, execute_query, upload_csv},
+        core::{describe_table, execute_query, execute_query_csv, upload_csv},
         executor::QueryExecutor,
     },
     utils::statics::AppState,
@@ -30,6 +30,7 @@ async fn main() {
     let app = Router::new()
         .route("/upload", post(upload_csv))
         .route("/query", post(execute_query))
+        .route("/query/csv", post(execute_query_csv)) 
         .route("/describe_table", get(describe_table))
         .route("/", get(|| async { "Hello from doubledecker angels." }))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024)) // 50 MB limit
