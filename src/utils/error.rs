@@ -12,6 +12,7 @@ pub enum DoubledeckerError {
     FileUpload(String),
     MultipartError(String),
     InvalidFilePath,
+    S3Error(String),
 
     // DataFusion/DataFrame errors
     DataFusionError(String),
@@ -21,6 +22,12 @@ pub enum DoubledeckerError {
     // Query errors
     QueryExecution(String),
     InvalidQuery(String),
+
+    // Database errors
+    DatabaseError(String),
+    AuthenticationError(String),
+    NotFound(String),
+    Unauthorized,
 
     // General errors
     Internal(String),
@@ -34,11 +41,16 @@ impl DoubledeckerError {
             DoubledeckerError::FileUpload(_) => StatusCode::BAD_REQUEST,
             DoubledeckerError::MultipartError(_) => StatusCode::BAD_REQUEST,
             DoubledeckerError::InvalidFilePath => StatusCode::BAD_REQUEST,
+            DoubledeckerError::S3Error(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DoubledeckerError::DataFusionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DoubledeckerError::ColumnNotFound(_) => StatusCode::NOT_FOUND,
             DoubledeckerError::TableNotFound(_) => StatusCode::NOT_FOUND,
             DoubledeckerError::QueryExecution(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DoubledeckerError::InvalidQuery(_) => StatusCode::BAD_REQUEST,
+            DoubledeckerError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            DoubledeckerError::AuthenticationError(_) => StatusCode::UNAUTHORIZED,
+            DoubledeckerError::NotFound(_) => StatusCode::NOT_FOUND,
+            DoubledeckerError::Unauthorized => StatusCode::UNAUTHORIZED,
             DoubledeckerError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DoubledeckerError::BadRequest(_) => StatusCode::BAD_REQUEST,
         }
@@ -49,11 +61,16 @@ impl DoubledeckerError {
         match self {
             DoubledeckerError::FileUpload(msg) => format!("File upload error: {}", msg),
             DoubledeckerError::InvalidFilePath => "Invalid file path".to_string(),
+            DoubledeckerError::S3Error(msg) => format!("S3 error: {}", msg),
             DoubledeckerError::DataFusionError(msg) => format!("DataFrame error: {}", msg),
             DoubledeckerError::ColumnNotFound(col) => format!("Column not found: {}", col),
             DoubledeckerError::TableNotFound(table) => format!("Table not found: {}", table),
             DoubledeckerError::QueryExecution(msg) => format!("Query execution error: {}", msg),
             DoubledeckerError::InvalidQuery(msg) => format!("Invalid query: {}", msg),
+            DoubledeckerError::DatabaseError(msg) => format!("Database error: {}", msg),
+            DoubledeckerError::AuthenticationError(msg) => format!("Authentication error: {}", msg),
+            DoubledeckerError::NotFound(msg) => format!("Not found: {}", msg),
+            DoubledeckerError::Unauthorized => "Unauthorized".to_string(),
             DoubledeckerError::Internal(msg) => format!("Internal error: {}", msg),
             DoubledeckerError::BadRequest(msg) => format!("Bad request: {}", msg),
             DoubledeckerError::MultipartError(msg) => format!("Multipart error: {}", msg),

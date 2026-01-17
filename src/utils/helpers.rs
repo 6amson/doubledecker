@@ -1,4 +1,5 @@
 use crate::utils::error::DoubledeckerError;
+use crate::utils::s3::S3Uploader;
 use crate::utils::statics::{AggFunc, Aggregation, FilterOp, QueryResponse};
 use arrow_json::writer::{JsonArray, WriterBuilder};
 use axum::extract::Multipart;
@@ -6,8 +7,6 @@ use datafusion::arrow::array::*;
 use datafusion::error::Result as DfResult;
 use datafusion::functions_aggregate::expr_fn::*;
 use datafusion::logical_expr::{Expr, col, lit};
-use uuid::Uuid;
-
 pub fn build_filter_expr(column: &str, operator: FilterOp, value: &str) -> DfResult<Expr> {
     let col_expr = col(column);
 
@@ -46,15 +45,17 @@ pub fn build_aggregation_expr(agg: &Aggregation) -> DfResult<Expr> {
     })
 }
 
-pub async fn handle_file_upload(mut multipart: Multipart) -> Result<String, DoubledeckerError> {
-    use tokio::io::AsyncWriteExt;
-
-    let upload_dir = "./uploads";
-    tokio::fs::create_dir_all(upload_dir).await?;
-
+pub async fn handle_file_upload(
+    mut multipart: Multipart,
+) -> Result<(String, String, usize), DoubledeckerError> {
+    eprintln!("Starting handle_file_upload");
     while let Some(field) = multipart.next_field().await? {
+        eprintln!("Processing field: {:?}", field.name());
         if field.name() == Some("file") {
-            let file_path = format!("{}/upload_{}.csv", upload_dir, Uuid::new_v4());
+            let file_name = field
+                .file_name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
 
             // Collect all chunks into a buffer
             let mut stream = field;
@@ -67,6 +68,7 @@ pub async fn handle_file_upload(mut multipart: Multipart) -> Result<String, Doub
             // Parse CSV and normalize headers to lowercase
             let csv_str = String::from_utf8(buffer)
                 .map_err(|e| DoubledeckerError::FileUpload(format!("Invalid UTF-8: {}", e)))?;
+            eprintln!("Read file size: {} bytes", csv_str.len());
 
             let lines: Vec<&str> = csv_str.lines().collect();
             if lines.is_empty() {
@@ -78,13 +80,19 @@ pub async fn handle_file_upload(mut multipart: Multipart) -> Result<String, Doub
             let mut normalized_lines = vec![lowercase_header];
             normalized_lines.extend(lines[1..].iter().map(|s| s.to_string()));
 
-            // Write the normalized CSV to file
             let normalized_csv = normalized_lines.join("\n");
-            let mut file = tokio::fs::File::create(&file_path).await?;
-            file.write_all(normalized_csv.as_bytes()).await?;
-            file.flush().await?;
+            let normalized_bytes = normalized_csv.as_bytes().to_vec();
+            let file_size = normalized_bytes.len();
 
-            return Ok(file_path);
+            let s3_key = S3Uploader::new()
+                .await
+                .upload_csv(normalized_bytes)
+                .await
+                .map_err(|e| DoubledeckerError::FileUpload(format!("S3 upload failed: {}", e)))?;
+
+            eprintln!("S3 upload successful, key: {}", s3_key);
+
+            return Ok((format!("s3://{}", s3_key), file_name, file_size));
         }
     }
     Err(DoubledeckerError::FileUpload(
