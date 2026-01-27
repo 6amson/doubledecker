@@ -7,8 +7,17 @@ use datafusion::arrow::array::*;
 use datafusion::error::Result as DfResult;
 use datafusion::functions_aggregate::expr_fn::*;
 use datafusion::logical_expr::{Expr, col, lit};
+
+pub fn col_escaped(name: &str) -> Expr {
+    if name.contains('.') || name.contains(' ') || name.contains('-') {
+        col(format!("\"{}\"", name))
+    } else {
+        col(name)
+    }
+}
+
 pub fn build_filter_expr(column: &str, operator: FilterOp, value: &str) -> DfResult<Expr> {
-    let col_expr = col(column);
+    let col_expr = col_escaped(column);
 
     let lit_value = if let Ok(num) = value.parse::<f64>() {
         lit(num)
@@ -28,7 +37,7 @@ pub fn build_filter_expr(column: &str, operator: FilterOp, value: &str) -> DfRes
 }
 
 pub fn build_aggregation_expr(agg: &Aggregation) -> DfResult<Expr> {
-    let col_expr = col(&agg.column);
+    let col_expr = col_escaped(&agg.column);
 
     let expr = match agg.function {
         AggFunc::Sum => sum(col_expr),

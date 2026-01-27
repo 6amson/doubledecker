@@ -1,12 +1,15 @@
 use crate::utils::error::DoubledeckerError;
-use crate::utils::helpers::{build_aggregation_expr, build_filter_expr, parse_batch_to_json};
+use crate::utils::helpers::{
+    build_aggregation_expr, build_filter_expr, col_escaped, parse_batch_to_json,
+};
 use crate::utils::s3::S3Uploader;
 use crate::utils::statics::{Operations, QueryResponse, TransformOp};
 use datafusion::arrow::array::RecordBatch;
 use datafusion::error::Result;
-use datafusion::logical_expr::{Expr, col};
+use datafusion::logical_expr::Expr;
 use datafusion::prelude::{CsvReadOptions, DataFrame, SessionContext, lit};
 use tokio::io::AsyncWriteExt;
+
 pub struct QueryExecutor {
     ctx: SessionContext,
 }
@@ -71,27 +74,37 @@ impl QueryExecutor {
         let mut df = self.ctx.table(table_name).await?;
 
         eprintln!(">>> Initial Schema for table '{}':", table_name);
-        for field in df.schema().fields() {
-            eprintln!("   - {}", field.name());
-        }
 
-        for (i, op) in operations.iter().enumerate() {
-            eprintln!(">>> Applying Operation [{}]: {:?}", i, op);
-            match self.apply_operation(df.clone(), op.clone()).await {
-                Ok(new_df) => {
-                    df = new_df;
-                    eprintln!("   ✓ Operation Successful");
-                }
-                Err(e) => {
-                    eprintln!("   ❌ Operation Failed: {}", e);
-                    eprintln!("   Schema was:");
-                    for field in df.schema().fields() {
-                        eprintln!("      - {}", field.name());
-                    }
-                    return Err(e);
-                }
-            }
+        // for field in df.schema().fields() {
+        //     eprintln!("   - {}", field.name());
+        // }
+
+        // for (i, op) in operations.iter().enumerate() {
+        //     eprintln!(">>> Applying Operation [{}]: {:?}", i, op);
+        //     match self.apply_operation(df.clone(), op.clone()).await {
+        //         Ok(new_df) => {
+        //             df = new_df;
+        //             eprintln!("   ✓ Operation Successful");
+        //             eprintln!("   Schema after operation:");
+        //             for field in df.schema().fields() {
+        //                 eprintln!("      - {}", field.name());
+        //             }
+        //         }
+        //         Err(e) => {
+        //             eprintln!("   ❌ Operation Failed: {}", e);
+        //             eprintln!("   Schema was:");
+        //             for field in df.schema().fields() {
+        //                 eprintln!("      - {}", field.name());
+        //             }
+        //             return Err(e);
+        //         }
+        //     }
+        // }
+
+        for op in operations {
+            df = self.apply_operation(df, op).await?;
         }
+        
         // df.execute_stream().await?;
         // TODO: Implement streaming over GRPC maybe?? for now serve via http.
 
@@ -120,7 +133,7 @@ impl QueryExecutor {
     pub async fn apply_operation(&self, df: DataFrame, op: Operations) -> Result<DataFrame> {
         match op {
             Operations::Select { columns } => {
-                let cols: Vec<Expr> = columns.iter().map(|c| col(c)).collect();
+                let cols: Vec<Expr> = columns.iter().map(|c| col_escaped(c)).collect();
                 df.select(cols)
             }
             Operations::Filter {
@@ -146,7 +159,7 @@ impl QueryExecutor {
                     ));
                 }
 
-                let group_cols: Vec<Expr> = columns.iter().map(|c| col(c)).collect();
+                let group_cols: Vec<Expr> = columns.iter().map(|c| col_escaped(c)).collect();
                 let agg_cols: Vec<Expr> = aggregations
                     .iter()
                     .map(|agg| build_aggregation_expr(agg))
@@ -154,7 +167,7 @@ impl QueryExecutor {
                 df.aggregate(group_cols, agg_cols)
             }
             Operations::Sort { column, ascending } => {
-                let sort_expr = col(&column);
+                let sort_expr = col_escaped(&column);
                 let expr_fn = if ascending {
                     sort_expr.sort(true, true)
                 } else {
@@ -169,7 +182,7 @@ impl QueryExecutor {
                 value,
                 alias,
             } => {
-                let source_expr = col(&column);
+                let source_expr = col_escaped(&column);
                 let value_lit = lit(value);
 
                 let transform_expr = match operation {

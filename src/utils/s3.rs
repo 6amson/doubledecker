@@ -84,4 +84,17 @@ impl S3Uploader {
 
         Ok(presigned_request.uri().to_string())
     }
+
+    /// Delete file from S3 by key
+    pub async fn delete_file(&self, key: &str) -> Result<(), DoubledeckerError> {
+        self.client
+            .delete_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| DoubledeckerError::S3Error(e.to_string()))?;
+
+        Ok(())
+    }
 }

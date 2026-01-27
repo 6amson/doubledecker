@@ -429,6 +429,32 @@ pub async fn get_upload_by_table_name(
     Ok(upload)
 }
 
+pub async fn get_upload_by_id(
+    pool: &PgPool,
+    id: Uuid,
+    user_id: Uuid,
+) -> Result<crate::db::models::Upload, DoubledeckerError> {
+    let upload = sqlx::query_as::<_, Upload>(
+        r#"
+        SELECT id, user_id, file_name, s3_key, file_size, file_type, table_name, created_at, updated_at
+        FROM uploads
+        WHERE id = $1 AND user_id = $2
+        "#,
+    )
+    .bind(id)
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::RowNotFound => {
+            DoubledeckerError::NotFound("Upload not found or access denied".to_string())
+        }
+        _ => DoubledeckerError::DatabaseError(e.to_string()),
+    })?;
+
+    Ok(upload)
+}
+
 pub async fn delete_upload(
     pool: &PgPool,
     id: Uuid,

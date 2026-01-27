@@ -7,3 +7,5 @@ using a WriterBuilder to construct a Writer.
 To serialize RecordBatches into an array of
 JSON objects you can reparse the resulting JSON string.
 Note that this is less efficient than using the Writer API.
+
+* parsing issues with column names with special characters, a helper function to espcape them helped the process.

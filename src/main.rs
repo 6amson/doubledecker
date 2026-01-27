@@ -3,13 +3,13 @@
 use crate::{
     db::pool::{init_pool, run_migrations},
     server::{
-        auth::{login, signup},
+        auth::{get_profile, login, signup},
         core::{download_query_csv, execute_query, upload_csv},
         saved_queries::{
             create_saved_query_handler, delete_saved_query_handler, get_saved_query_handler,
             list_saved_queries_handler, update_saved_query_handler,
         },
-        uploads::list_uploads_handler,
+        uploads::{delete_upload_handler, list_uploads_handler},
     },
     utils::statics::AppState,
 };
@@ -48,6 +48,7 @@ async fn main() {
         // Authentication routes
         .route("/auth/signup", post(signup))
         .route("/auth/login", post(login))
+        .route("/profile", get(get_profile))
         // Saved queries routes
         .route("/saved_queries", post(create_saved_query_handler))
         .route("/saved_queries", get(list_saved_queries_handler))
@@ -56,6 +57,7 @@ async fn main() {
         .route("/saved_queries/:id", delete(delete_saved_query_handler))
         // Uploads routes
         .route("/uploads", get(list_uploads_handler))
+        .route("/uploads/:id", delete(delete_upload_handler))
         // CSV and query routes
         .route("/upload", post(upload_csv))
         .route("/query", post(execute_query))

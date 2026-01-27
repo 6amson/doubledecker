@@ -1,4 +1,5 @@
-use crate::db::operations::{create_user, get_user_by_email, verify_password};
+use crate::db::operations::{create_user, get_user_by_email, get_user_by_id, verify_password};
+use crate::server::middleware::AuthenticatedUser;
 use crate::utils::error::DoubledeckerError;
 use crate::utils::jwt::generate_token;
 use crate::utils::statics::{AppState, AuthResponse, LoginRequest, RegisterRequest, UserInfo};
@@ -73,3 +74,19 @@ pub async fn login(
         },
     }))
 }
+
+pub async fn get_profile(
+    auth_user: AuthenticatedUser,
+    State(state): State<AppState>,
+) -> Result<Json<UserInfo>, DoubledeckerError> {
+    let user = get_user_by_id(&state.db_pool, auth_user.user_id).await?;
+
+    Ok(Json(UserInfo {
+        id: user.id,
+        email: user.email,
+        total_queries: user.total_queries,
+        total_files_processed: user.total_files_processed,
+        total_saved_queries: user.total_saved_queries,
+    }))
+}
+
