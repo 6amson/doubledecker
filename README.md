@@ -43,7 +43,7 @@ cd doubledecker
 DATABASE_URL=postgresql://user:password@localhost/doubledecker
 JWT_SECRET=your-secret-key-here
 AWS_REGION=us-east-1
-S3_BUCKET_NAME=dd-query-csv-bucket
+S3_BUCKET_NAME=query-bucket-name
 ```
 
 3. Run database migrations:
