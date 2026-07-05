@@ -33,6 +33,81 @@ pub fn build_filter_expr(column: &str, operator: FilterOp, value: &str) -> DfRes
         FilterOp::Lt => col_expr.lt(lit_value),
         FilterOp::Le => col_expr.lt_eq(lit_value),
         FilterOp::Contains => col_expr.like(lit(format!("%{}%", value))),
+        FilterOp::IsNull => col_expr.is_null(),
+        FilterOp::IsNotNull => col_expr.is_not_null(),
+        FilterOp::In => {
+            let list: Vec<Expr> = if value.starts_with('[') && value.ends_with(']') {
+                if let Ok(vec) = serde_json::from_str::<Vec<serde_json::Value>>(value) {
+                    vec.into_iter()
+                        .map(|v| {
+                            if let Some(n) = v.as_f64() {
+                                lit(n)
+                            } else if let Some(s) = v.as_str() {
+                                lit(s)
+                            } else {
+                                lit(v.to_string())
+                            }
+                        })
+                        .collect()
+                } else {
+                    vec![lit(value)]
+                }
+            } else {
+                value
+                    .split(',')
+                    .map(|s| {
+                        let trimmed = s.trim();
+                        if let Ok(num) = trimmed.parse::<f64>() {
+                            lit(num)
+                        } else {
+                            lit(trimmed)
+                        }
+                    })
+                    .collect()
+            };
+            col_expr.in_list(list, false)
+        }
+        FilterOp::Between => {
+            let parts: Vec<String> = if value.contains(" and ") {
+                value.split(" and ").map(|s| s.trim().to_string()).collect()
+            } else if value.contains(" AND ") {
+                value.split(" AND ").map(|s| s.trim().to_string()).collect()
+            } else if value.starts_with('[') && value.ends_with(']') {
+                if let Ok(vec) = serde_json::from_str::<Vec<serde_json::Value>>(value) {
+                    vec.iter()
+                        .map(|v| {
+                            if let Some(n) = v.as_f64() {
+                                n.to_string()
+                            } else if let Some(s) = v.as_str() {
+                                s.to_string()
+                            } else {
+                                v.to_string()
+                            }
+                        })
+                        .collect()
+                } else {
+                    value.split(',').map(|s| s.trim().to_string()).collect()
+                }
+            } else {
+                value.split(',').map(|s| s.trim().to_string()).collect()
+            };
+
+            if parts.len() == 2 {
+                let low = if let Ok(num) = parts[0].parse::<f64>() {
+                    lit(num)
+                } else {
+                    lit(&parts[0])
+                };
+                let high = if let Ok(num) = parts[1].parse::<f64>() {
+                    lit(num)
+                } else {
+                    lit(&parts[1])
+                };
+                col_expr.between(low, high)
+            } else {
+                col_expr.eq(lit(value))
+            }
+        }
     })
 }
 
@@ -45,6 +120,8 @@ pub fn build_aggregation_expr(agg: &Aggregation) -> DfResult<Expr> {
         AggFunc::Max => max(col_expr),
         AggFunc::Min => min(col_expr),
         AggFunc::Count => count(col_expr),
+        AggFunc::CountDistinct => count_distinct(col_expr),
+        AggFunc::Median => median(col_expr),
     };
 
     Ok(if let Some(alias) = &agg.alias {

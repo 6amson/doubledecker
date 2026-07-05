@@ -3,7 +3,7 @@ use sqlx::PgPool;
 
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub enum FilterOp {
     Eq,
     Ne,
@@ -12,15 +12,21 @@ pub enum FilterOp {
     Lt,
     Le,
     Contains,
+    IsNull,
+    IsNotNull,
+    In,
+    Between,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub enum AggFunc {
     Sum,
     Avg,
     Max,
     Min,
     Count,
+    CountDistinct,
+    Median,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -30,12 +36,16 @@ pub struct Aggregation {
     pub alias: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 pub enum TransformOp {
     Multiply,
     Divide,
     Add,
     Subtract,
+    DateTruncYear,
+    DateTruncMonth,
+    DateTruncWeek,
+    DateTruncDay,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -47,6 +57,7 @@ pub enum Operations {
     Filter {
         column: String,
         operator: FilterOp,
+        #[serde(default)]
         value: String,
     },
     GroupBy {
@@ -63,6 +74,7 @@ pub enum Operations {
     Transform {
         column: String,
         operation: TransformOp,
+        #[serde(default)]
         value: f64,
         alias: String,
     },

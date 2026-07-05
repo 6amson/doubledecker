@@ -11,6 +11,7 @@ use axum::body::Body;
 use axum::extract::{Json, Multipart, State};
 use axum::http::header;
 use axum::response::Response;
+use futures::StreamExt;
 use std::path::Path;
 // use axum_macros::debug_handler;
 
@@ -104,7 +105,16 @@ pub async fn execute_query(
 
     eprintln!("Stateless query: Loading table '{}'", table_name);
     let upload = get_upload_by_table_name(&state.db_pool, &table_name, auth_user.user_id).await?;
-    let s3_path = format!("s3://{}", upload.s3_key);
+    let bucket = std::env::var("S3_BUCKET").unwrap_or_else(|_| "dd-query-csv-bucket".to_string());
+    let s3_path = if upload.s3_key.contains('/') || upload.s3_key.starts_with("s3://") {
+        if upload.s3_key.starts_with("s3://") {
+            upload.s3_key.clone()
+        } else {
+            format!("s3://{}", upload.s3_key)
+        }
+    } else {
+        format!("s3://{}/{}", bucket, upload.s3_key)
+    };
 
     // Create a fresh executor for this request to avoid concurrent query conflicts
     let executor = crate::server::executor::QueryExecutor::new();
@@ -114,10 +124,16 @@ pub async fn execute_query(
         .await
         .map_err(|e| DoubledeckerError::DataFusionError(e.to_string()))?;
 
-    let batches = executor
+    let mut data_stream = executor
         .execute_operations(&table_name, payload.operations)
         .await
         .map_err(|e| DoubledeckerError::QueryExecution(e.to_string()))?;
+
+    let mut batches = Vec::new();
+    while let Some(batch_result) = data_stream.next().await {
+        let record_batch = batch_result.map_err(|e| DoubledeckerError::QueryExecution(e.to_string()))?;
+        batches.push(record_batch);
+    }
 
     let response = parse_batch_to_json(batches).await?;
 
@@ -138,7 +154,16 @@ pub async fn download_query_csv(
 
     eprintln!("Stateless download: Loading table '{}'", table_name);
     let upload = get_upload_by_table_name(&state.db_pool, &table_name, auth_user.user_id).await?;
-    let s3_path = format!("s3://{}", upload.s3_key);
+    let bucket = std::env::var("S3_BUCKET").unwrap_or_else(|_| "dd-query-csv-bucket".to_string());
+    let s3_path = if upload.s3_key.contains('/') || upload.s3_key.starts_with("s3://") {
+        if upload.s3_key.starts_with("s3://") {
+            upload.s3_key.clone()
+        } else {
+            format!("s3://{}", upload.s3_key)
+        }
+    } else {
+        format!("s3://{}/{}", bucket, upload.s3_key)
+    };
 
     // Create a fresh executor for this request to avoid concurrent query conflicts
     let executor = crate::server::executor::QueryExecutor::new();
@@ -148,10 +173,16 @@ pub async fn download_query_csv(
         .await
         .map_err(|e| DoubledeckerError::DataFusionError(e.to_string()))?;
 
-    let batches = executor
+    let mut data_stream = executor
         .execute_operations(&table_name, payload.operations)
         .await
         .map_err(|e| DoubledeckerError::QueryExecution(e.to_string()))?;
+
+    let mut batches = Vec::new();
+    while let Some(batch_result) = data_stream.next().await {
+        let record_batch = batch_result.map_err(|e| DoubledeckerError::QueryExecution(e.to_string()))?;
+        batches.push(record_batch);
+    }
 
     let response = parse_batch_to_json(batches).await?;
 
