@@ -1,6 +1,12 @@
+pub mod analytics;
 pub mod auth;
-pub mod core;
-pub mod executor;
+pub mod catalog;
+pub mod dtos;
+pub mod extractors;
 pub mod middleware;
-pub mod saved_queries;
+pub mod openapi;
+pub mod payees;
+pub mod splits;
+pub mod state;
 pub mod uploads;
+pub mod workspaces;

@@ -35,6 +35,21 @@ impl S3Uploader {
         Ok(key)
     }
 
+    /// Upload CSV content to a specific S3 key
+    pub async fn upload_csv_with_key(&self, key: &str, content: Vec<u8>) -> Result<String, DoubledeckerError> {
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .body(ByteStream::from(content))
+            .content_type("text/csv")
+            .send()
+            .await
+            .map_err(|e| DoubledeckerError::S3Error(e.to_string()))?;
+
+        Ok(key.to_string())
+    }
+
     /// Download CSV from S3 by key
     pub async fn download_csv(&self, key: &str) -> Result<Vec<u8>, DoubledeckerError> {
         let response = self
@@ -96,5 +111,45 @@ impl S3Uploader {
             .map_err(|e| DoubledeckerError::S3Error(e.to_string()))?;
 
         Ok(())
+    }
+
+    /// Upload Parquet content to S3 and return the S3 key
+    pub async fn upload_parquet(&self, key: &str, content: Vec<u8>) -> Result<String, DoubledeckerError> {
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .body(ByteStream::from(content))
+            .content_type("application/vnd.apache.parquet")
+            .send()
+            .await
+            .map_err(|e| DoubledeckerError::S3Error(e.to_string()))?;
+
+        Ok(key.to_string())
+    }
+
+    /// Generate a presigned URL for uploading (PUT) a file to S3
+    pub async fn generate_presigned_put_url(
+        &self,
+        key: &str,
+        expiration_secs: Option<u64>,
+    ) -> Result<String, DoubledeckerError> {
+        let expiration = expiration_secs.unwrap_or(3600);
+
+        let presigned_request = self
+            .client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .presigned(
+                aws_sdk_s3::presigning::PresigningConfig::expires_in(
+                    std::time::Duration::from_secs(expiration),
+                )
+                .map_err(|e| DoubledeckerError::S3Error(e.to_string()))?,
+            )
+            .await
+            .map_err(|e| DoubledeckerError::S3Error(e.to_string()))?;
+
+        Ok(presigned_request.uri().to_string())
     }
 }

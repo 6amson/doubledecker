@@ -4,9 +4,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DoubledeckerError {
     // File upload errors
     FileUpload(String),
@@ -28,6 +29,7 @@ pub enum DoubledeckerError {
     AuthenticationError(String),
     NotFound(String),
     Unauthorized,
+    Forbidden(String),
 
     // General errors
     Internal(String),
@@ -51,6 +53,7 @@ impl DoubledeckerError {
             DoubledeckerError::AuthenticationError(_) => StatusCode::UNAUTHORIZED,
             DoubledeckerError::NotFound(_) => StatusCode::NOT_FOUND,
             DoubledeckerError::Unauthorized => StatusCode::UNAUTHORIZED,
+            DoubledeckerError::Forbidden(_) => StatusCode::FORBIDDEN,
             DoubledeckerError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             DoubledeckerError::BadRequest(_) => StatusCode::BAD_REQUEST,
         }
@@ -71,6 +74,7 @@ impl DoubledeckerError {
             DoubledeckerError::AuthenticationError(msg) => format!("Authentication error: {}", msg),
             DoubledeckerError::NotFound(msg) => format!("Not found: {}", msg),
             DoubledeckerError::Unauthorized => "Unauthorized".to_string(),
+            DoubledeckerError::Forbidden(msg) => format!("Forbidden: {}", msg),
             DoubledeckerError::Internal(msg) => format!("Internal error: {}", msg),
             DoubledeckerError::BadRequest(msg) => format!("Bad request: {}", msg),
             DoubledeckerError::MultipartError(msg) => format!("Multipart error: {}", msg),
@@ -129,3 +133,16 @@ impl std::fmt::Display for DoubledeckerError {
 
 // Implement std::error::Error trait
 impl std::error::Error for DoubledeckerError {}
+
+impl From<DoubledeckerError> for inngest::result::Error {
+    fn from(err: DoubledeckerError) -> Self {
+        inngest::result::Error::Dev(inngest::result::DevError::Basic(err.message()))
+    }
+}
+
+impl From<inngest::result::Error> for DoubledeckerError {
+    fn from(err: inngest::result::Error) -> Self {
+        DoubledeckerError::Internal(format!("Inngest error: {:?}", err))
+    }
+}
+
